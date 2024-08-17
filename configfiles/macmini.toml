@@ -1,0 +1,3 @@
+url = "http://macmini.local/"
+workers = 128
+iterationsPerWorker = 100

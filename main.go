@@ -10,22 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aaronriekenberg/go-bench/config"
 	"github.com/jamiealquiza/tachymeter"
 )
-
-type configuration struct {
-	URL                 string
-	NumWorkers          int
-	IterationsPerWorker int
-}
-
-func buildConfiguration() configuration {
-	return configuration{
-		URL:                 "http://macmini.local/",
-		NumWorkers:          64,
-		IterationsPerWorker: 250,
-	}
-}
 
 func makeHTTPCall(
 	ctx context.Context,
@@ -60,7 +47,7 @@ func makeHTTPCall(
 func runWorker(
 	workerNumber int,
 	t *tachymeter.Tachymeter,
-	config configuration,
+	config config.Configuration,
 	wg *sync.WaitGroup,
 ) {
 	defer wg.Done()
@@ -128,10 +115,19 @@ func main() {
 
 	setupSlog()
 
-	configuration := buildConfiguration()
+	if len(os.Args) != 2 {
+		panic("config file required as command line arument")
+	}
+
+	configFile := os.Args[1]
+
+	configuration, err := config.ReadConfiguration(configFile)
+	if err != nil {
+		panic(fmt.Errorf("main: config.ReadConfiguration error: %w", err))
+	}
 
 	slog.Info("begin main",
-		"configuration", &configuration,
+		"configuration", configuration,
 	)
 
 	t := tachymeter.New(&tachymeter.Config{
@@ -142,12 +138,12 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < configuration.NumWorkers; i++ {
+	for i := 0; i < configuration.Workers; i++ {
 		wg.Add(1)
 		go runWorker(
 			i,
 			t,
-			configuration,
+			*configuration,
 			&wg,
 		)
 	}
