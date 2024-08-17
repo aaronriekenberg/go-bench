@@ -18,7 +18,7 @@ func makeHTTPCall(
 	ctx context.Context,
 	httpClient *http.Client,
 	url string,
-) error {
+) (statusCode int, err error) {
 	request, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
@@ -26,12 +26,14 @@ func makeHTTPCall(
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf("http.NewRequestWithContext error %w", err)
+		err = fmt.Errorf("http.NewRequestWithContext error %w", err)
+		return
 	}
 
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("httpClient.Do error %w", err)
+		err = fmt.Errorf("httpClient.Do error %w", err)
+		return
 	}
 
 	slog.Debug("got response",
@@ -41,7 +43,13 @@ func makeHTTPCall(
 	defer response.Body.Close()
 	io.Copy(io.Discard, response.Body)
 
-	return nil
+	statusCode = response.StatusCode
+
+	return
+}
+
+type workerResult struct {
+	statusCodeCounts map[int]int
 }
 
 func runWorker(
@@ -49,24 +57,35 @@ func runWorker(
 	t *tachymeter.Tachymeter,
 	config config.Configuration,
 	wg *sync.WaitGroup,
+	workerResultChannel chan<- workerResult,
 ) {
 	defer wg.Done()
 
 	slog.Info("begin runWorker",
 		"workerNumber", workerNumber,
 	)
+
 	httpClient := &http.Client{}
 
 	ctx := context.TODO()
 
+	statusCodeCounts := make(map[int]int)
+
 	for i := 0; i < config.IterationsPerWorker; i++ {
 		start := time.Now()
 
-		makeHTTPCall(
+		statusCode, err := makeHTTPCall(
 			ctx,
 			httpClient,
 			config.URL,
 		)
+
+		if err != nil {
+			slog.Warn("makeHTTPCall error",
+				"error", err,
+			)
+		}
+		statusCodeCounts[statusCode]++
 
 		// Task we're timing added here.
 		t.AddTime(time.Since(start))
@@ -75,32 +94,10 @@ func runWorker(
 	slog.Info("end runWorker",
 		"workerNumber", workerNumber,
 	)
-}
 
-func setupSlog() {
-	level := slog.LevelInfo
-
-	if levelString, ok := os.LookupEnv("LOG_LEVEL"); ok {
-		err := level.UnmarshalText([]byte(levelString))
-		if err != nil {
-			panic(fmt.Errorf("level.UnmarshalText error %w", err))
-		}
+	workerResultChannel <- workerResult{
+		statusCodeCounts: statusCodeCounts,
 	}
-
-	slog.SetDefault(
-		slog.New(
-			slog.NewJSONHandler(
-				os.Stdout,
-				&slog.HandlerOptions{
-					Level: level,
-				},
-			),
-		),
-	)
-
-	slog.Info("setupSlog",
-		"configuredLevel", level,
-	)
 }
 
 func main() {
@@ -134,9 +131,11 @@ func main() {
 		Size: 1000,
 	})
 
-	wallTimeStart := time.Now()
+	workerResultsChannel := make(chan workerResult, configuration.Workers)
 
 	var wg sync.WaitGroup
+
+	wallTimeStart := time.Now()
 
 	for i := 0; i < configuration.Workers; i++ {
 		wg.Add(1)
@@ -145,6 +144,7 @@ func main() {
 			t,
 			*configuration,
 			&wg,
+			workerResultsChannel,
 		)
 	}
 
@@ -152,8 +152,46 @@ func main() {
 
 	t.SetWallTime(time.Since(wallTimeStart))
 
+	metrics := t.Calc()
+
+	close(workerResultsChannel)
+
+	mergedStatusCodeCount := make(map[int]int)
+	for workerResult := range workerResultsChannel {
+		for statusCode, count := range workerResult.statusCodeCounts {
+			mergedStatusCodeCount[statusCode] += count
+		}
+	}
+
 	slog.Info(
 		"end main",
-		"metrics", t.Calc(),
+		"metrics", metrics,
+		"mergedStatusCodeCount", mergedStatusCodeCount,
+	)
+}
+
+func setupSlog() {
+	level := slog.LevelInfo
+
+	if levelString, ok := os.LookupEnv("LOG_LEVEL"); ok {
+		err := level.UnmarshalText([]byte(levelString))
+		if err != nil {
+			panic(fmt.Errorf("level.UnmarshalText error %w", err))
+		}
+	}
+
+	slog.SetDefault(
+		slog.New(
+			slog.NewJSONHandler(
+				os.Stdout,
+				&slog.HandlerOptions{
+					Level: level,
+				},
+			),
+		),
+	)
+
+	slog.Info("setupSlog",
+		"configuredLevel", level,
 	)
 }
