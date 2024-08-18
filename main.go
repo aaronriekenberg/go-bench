@@ -94,7 +94,7 @@ func runWorker(
 
 	callDuration := time.Since(startTime)
 
-	callsPerSecond := float64(numCalls) / (callDuration.Seconds())
+	callsPerSecond := float64(numCalls) / callDuration.Seconds()
 
 	slog.Info("end runWorker",
 		"workerNumber", workerNumber,
@@ -165,7 +165,6 @@ func main() {
 
 	slog.Info(
 		"end main",
-		// "metrics", metrics,
 		"mergedStatusCodeCount", mergedStatusCodeCount,
 		"totalCallsPerSecond", totalCallsPerSecond,
 	)
