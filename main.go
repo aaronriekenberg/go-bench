@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/aaronriekenberg/go-bench/config"
-	"github.com/jamiealquiza/tachymeter"
 )
 
 func makeHTTPCall(
@@ -50,11 +49,11 @@ func makeHTTPCall(
 
 type workerResult struct {
 	statusCodeCounts map[int]int
+	callsPerSecond   float64
 }
 
 func runWorker(
 	workerNumber int,
-	t *tachymeter.Tachymeter,
 	config config.Configuration,
 	wg *sync.WaitGroup,
 	workerResultChannel chan<- workerResult,
@@ -71,8 +70,11 @@ func runWorker(
 
 	statusCodeCounts := make(map[int]int)
 
+	numCalls := 0
+
+	startTime := time.Now()
+
 	for i := 0; i < config.IterationsPerWorker; i++ {
-		start := time.Now()
 
 		statusCode, err := makeHTTPCall(
 			ctx,
@@ -87,16 +89,23 @@ func runWorker(
 		}
 		statusCodeCounts[statusCode]++
 
-		// Task we're timing added here.
-		t.AddTime(time.Since(start))
+		numCalls++
 	}
+
+	callDuration := time.Since(startTime)
+
+	callsPerSecond := float64(numCalls) / (callDuration.Seconds())
 
 	slog.Info("end runWorker",
 		"workerNumber", workerNumber,
+		"numCalls", numCalls,
+		"callDuration", callDuration.String(),
+		"callsPerSecond", callsPerSecond,
 	)
 
 	workerResultChannel <- workerResult{
 		statusCodeCounts: statusCodeCounts,
+		callsPerSecond:   callsPerSecond,
 	}
 }
 
@@ -127,21 +136,14 @@ func main() {
 		"configuration", configuration,
 	)
 
-	t := tachymeter.New(&tachymeter.Config{
-		Size: 1000,
-	})
-
 	workerResultsChannel := make(chan workerResult, configuration.Workers)
 
 	var wg sync.WaitGroup
-
-	wallTimeStart := time.Now()
 
 	for i := 0; i < configuration.Workers; i++ {
 		wg.Add(1)
 		go runWorker(
 			i,
-			t,
 			*configuration,
 			&wg,
 			workerResultsChannel,
@@ -150,23 +152,22 @@ func main() {
 
 	wg.Wait()
 
-	t.SetWallTime(time.Since(wallTimeStart))
-
-	metrics := t.Calc()
-
 	close(workerResultsChannel)
 
+	totalCallsPerSecond := float64(0)
 	mergedStatusCodeCount := make(map[int]int)
 	for workerResult := range workerResultsChannel {
 		for statusCode, count := range workerResult.statusCodeCounts {
 			mergedStatusCodeCount[statusCode] += count
+			totalCallsPerSecond += workerResult.callsPerSecond
 		}
 	}
 
 	slog.Info(
 		"end main",
-		"metrics", metrics,
+		// "metrics", metrics,
 		"mergedStatusCodeCount", mergedStatusCodeCount,
+		"totalCallsPerSecond", totalCallsPerSecond,
 	)
 }
 
