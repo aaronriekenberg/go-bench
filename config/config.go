@@ -7,10 +7,16 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+type HttpClientPoolConfiguration struct {
+	NumHttpClients int
+	UseH2C         bool
+}
+
 type Configuration struct {
-	URL                 string
-	Workers             int
-	IterationsPerWorker int
+	URL                         string
+	Workers                     int
+	IterationsPerWorker         int
+	HttpClientPoolConfiguration HttpClientPoolConfiguration
 }
 
 func ReadConfiguration(configFile string) (*Configuration, error) {

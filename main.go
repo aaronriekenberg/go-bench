@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aaronriekenberg/go-bench/clients"
 	"github.com/aaronriekenberg/go-bench/config"
 )
 
@@ -52,61 +53,67 @@ type workerResult struct {
 	callsPerSecond   float64
 }
 
-func runWorker(
+func startWorker(
 	workerNumber int,
 	config config.Configuration,
+	httpClientPool *clients.HttpClientPool,
 	wg *sync.WaitGroup,
 	workerResultChannel chan<- workerResult,
 ) {
-	defer wg.Done()
+	httpClient, httpClientIndex := httpClientPool.GetClient()
 
-	slog.Info("begin runWorker",
-		"workerNumber", workerNumber,
-	)
+	wg.Add(1)
 
-	httpClient := &http.Client{}
+	go func() {
+		defer wg.Done()
 
-	ctx := context.TODO()
-
-	statusCodeCounts := make(map[int]int)
-
-	numCalls := 0
-
-	startTime := time.Now()
-
-	for i := 0; i < config.IterationsPerWorker; i++ {
-
-		statusCode, err := makeHTTPCall(
-			ctx,
-			httpClient,
-			config.URL,
+		slog.Info("begin runWorker",
+			"workerNumber", workerNumber,
+			"httpClientIndex", httpClientIndex,
 		)
 
-		if err != nil {
-			slog.Warn("makeHTTPCall error",
-				"error", err,
+		ctx := context.TODO()
+
+		statusCodeCounts := make(map[int]int)
+
+		numCalls := 0
+
+		startTime := time.Now()
+
+		for i := 0; i < config.IterationsPerWorker; i++ {
+
+			statusCode, err := makeHTTPCall(
+				ctx,
+				httpClient,
+				config.URL,
 			)
+
+			if err != nil {
+				slog.Warn("makeHTTPCall error",
+					"error", err,
+				)
+			}
+			statusCodeCounts[statusCode]++
+
+			numCalls++
 		}
-		statusCodeCounts[statusCode]++
 
-		numCalls++
-	}
+		callDuration := time.Since(startTime)
 
-	callDuration := time.Since(startTime)
+		callsPerSecond := float64(numCalls) / callDuration.Seconds()
 
-	callsPerSecond := float64(numCalls) / callDuration.Seconds()
+		slog.Info("end runWorker",
+			"workerNumber", workerNumber,
+			"numCalls", numCalls,
+			"callDuration", callDuration.String(),
+			"callsPerSecond", callsPerSecond,
+		)
 
-	slog.Info("end runWorker",
-		"workerNumber", workerNumber,
-		"numCalls", numCalls,
-		"callDuration", callDuration.String(),
-		"callsPerSecond", callsPerSecond,
-	)
-
-	workerResultChannel <- workerResult{
-		statusCodeCounts: statusCodeCounts,
-		callsPerSecond:   callsPerSecond,
-	}
+		workerResultChannel <- workerResult{
+			statusCodeCounts: statusCodeCounts,
+			callsPerSecond:   callsPerSecond,
+		}
+	}()
 }
 
 func main() {
@@ -136,15 +143,19 @@ func main() {
 		"configuration", configuration,
 	)
 
+	httpClientPool := clients.NewHttpClientPool(
+		configuration.HttpClientPoolConfiguration,
+	)
+
 	workerResultsChannel := make(chan workerResult, configuration.Workers)
 
 	var wg sync.WaitGroup
 
 	for i := 0; i < configuration.Workers; i++ {
-		wg.Add(1)
-		go runWorker(
+		startWorker(
 			i,
 			*configuration,
+			httpClientPool,
 			&wg,
 			workerResultsChannel,
 		)
