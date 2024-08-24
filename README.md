@@ -1,6 +1,8 @@
 # go-bench
 
-Silly little go HTTP client benchmark tool.
+Go HTTP client benchmark tool, supporting H2C and HTTP/1.1.
+
+TLDR H2C is significantly faster than HTTP/1.1.
 
 Example command:
 
