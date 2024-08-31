@@ -1,7 +1,7 @@
 url = "http://macmini.local:8080/api/v1/request_info"
-workers = 1000
+workers = 2000
 iterationsPerWorker = 200
 
 [HttpClientPoolConfiguration]
-numHttpClients = 1
+numHttpClients = 4
 useH2C = true

@@ -22,6 +22,10 @@ func NewHttpClientPool(
 	configuration config.HttpClientPoolConfiguration,
 ) *HttpClientPool {
 
+	if configuration.NumHttpClients < 1 {
+		panic("NumHttpClients < 1")
+	}
+
 	clients := make([]*http.Client, 0, configuration.NumHttpClients)
 
 	for i := 0; i < configuration.NumHttpClients; i++ {
